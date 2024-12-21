@@ -1,0 +1,7 @@
+/vendor
+.env
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
