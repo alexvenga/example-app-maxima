@@ -1,0 +1,184 @@
+services:
+
+  nginx:
+    image: nginx:latest
+    restart: always
+    environment:
+      TZ: $TZ
+    ports:
+      - 80:80
+    volumes:
+      - ./services/nginx/conf.d:/etc/nginx/conf.d
+      - ./src:/application
+    working_dir: /application
+    networks:
+      - maxima
+    depends_on:
+      - php-fpm
+      - vite
+
+  php-fpm:
+    build:
+      context: .
+      dockerfile: services/php-fpm/Dockerfile
+    restart: always
+    user: $DEV_LOCAL_UID:$DEV_LOCAL_GID
+    volumes:
+      - ./src:/application
+    working_dir: /application
+    networks:
+      - maxima
+    depends_on:
+      - redis
+      - php-init
+      - mysql
+      - postgres
+      - mongo
+
+  php-init:
+    build:
+      context: .
+      dockerfile: services/php-cli/Dockerfile
+    user: $DEV_LOCAL_UID:$DEV_LOCAL_GID
+    volumes:
+      - ./src:/application
+    working_dir: /application
+    networks:
+      - maxima
+    command:
+      - /bin/sh
+      - -c
+      - |
+        composer install --ansi --no-cache
+        php artisan -n --ansi view:clear            # Reset views cache storage/framework/views
+        php artisan -n --ansi route:clear           # Reset routes cache bootstrap/cache/routes-v7.php
+        php artisan -n --ansi config:clear          # Reset configuration cache bootstrap/cache/config.php
+        php artisan -n --ansi clear                 # Reset cache bootstrap/cache/packages.php and bootstrap/cache/services.php
+        php artisan -n --ansi schedule:clear-cache  # Reset mutex cache for schedules
+        php artisan migrate
+    depends_on:
+      - mysql
+      - postgres
+      - redis
+      - mongo
+
+  php-schedule:
+    build:
+      context: .
+      dockerfile: services/php-cli/Dockerfile
+    user: $DEV_LOCAL_UID:$DEV_LOCAL_GID
+    volumes:
+      - ./src:/application
+    working_dir: /application
+    networks:
+      - maxima
+    command:
+      - /bin/sh
+      - -c
+      - |
+        php artisan schedule:work
+    depends_on:
+      - php-init
+
+  php-queue-default:
+    build:
+      context: .
+      dockerfile: services/php-cli/Dockerfile
+    user: $DEV_LOCAL_UID:$DEV_LOCAL_GID
+    volumes:
+      - ./src:/application
+    working_dir: /application
+    networks:
+      - maxima
+    command:
+      - /bin/sh
+      - -c
+      - |
+        php artisan queue:listen
+    depends_on:
+      - php-init
+
+  redis:
+    image: redis:latest
+    volumes:
+      - ./data/redis:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - maxima
+
+  mysql:
+    image: mysql:latest
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: laravel
+      MYSQL_USER: laravel
+      MYSQL_PASSWORD: laravel
+      TZ: $TZ
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - maxima
+
+  postgres:
+    image: postgres:latest
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DATABASE: laravel
+      POSTGRES_USER: laravel
+      POSTGRES_PASSWORD: laravel
+      TZ: $TZ
+      PGPORT: 5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - maxima
+
+  mongo:
+    image: mongo:latest
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: laravel
+      MONGO_INITDB_ROOT_PASSWORD: laravel
+    volumes:
+      - ./data/mongo:/data/db
+
+  mongo-express:
+    image: mongo-express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: maxima
+      ME_CONFIG_MONGODB_ADMINPASSWORD: maxima
+      ME_CONFIG_MONGODB_URL: mongodb://laravel:laravel@mongo:27017/
+      ME_CONFIG_BASICAUTH: false
+
+  vite:
+    image: node:latest
+    restart: always
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./src:/application
+    working_dir: /application
+    command:
+      - /bin/sh
+      - -c
+      - |
+        npm i --save-dev
+        npm run dev --host
+    networks:
+      - maxima
+
+networks:
+  maxima:
+    external: true
+
